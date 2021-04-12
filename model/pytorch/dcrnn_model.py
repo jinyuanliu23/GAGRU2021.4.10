@@ -3,7 +3,7 @@ import torch
 import torch.nn as nn
 # str.encode('utf-8')
 # bytes.decode('utf-8')
-
+import logging
 from model.pytorch.dcrnn_cell import GAGRUCell
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -57,7 +57,13 @@ class EncoderModel(nn.Module, Seq2SeqAttrs):
                                        device=device)
         hidden_states = []
         output = inputs
+        # print('output.size',output.shape)
+        # return None
         for layer_num, gagru_layer in enumerate(self.gagru_layers):
+            # print('layer_num',layer_num)
+            # print('output.size',output.shape)
+            logging.warning('layer_num {}'.format(layer_num))
+            logging.warning('output size {}'.format(output.shape))
             next_hidden_state = gagru_layer(output , hidden_state[layer_num])
             hidden_states.append(next_hidden_state)
             output = next_hidden_state
@@ -125,6 +131,7 @@ class GARNNModel(nn.Module, Seq2SeqAttrs):
         :return: encoder_hidden_state: (num_layers, batch_size, self.hidden_state_size)
         """
         encoder_hidden_state = None
+        logging.warning('encoder-input{}'.format(inputs.shape))
         for t in range(self.encoder_model.seq_len):
             _, encoder_hidden_state = self.encoder_model(inputs[t], encoder_hidden_state)
 
@@ -167,6 +174,7 @@ class GARNNModel(nn.Module, Seq2SeqAttrs):
         :return: output: (self.horizon, batch_size, self.num_nodes * self.output_dim)
         """
         encoder_hidden_state = self.encoder(inputs)
+        return None
         # loss = encoder_hidden_state.sum()
         # loss.backward()
         # assert False

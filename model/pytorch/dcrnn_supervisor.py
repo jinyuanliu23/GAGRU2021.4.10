@@ -203,9 +203,14 @@ class GARNNSupervisor:
                 optimizer.zero_grad()
 
                 x, y = self._prepare_data(x, y)
+                # print('x-shape',x.shape)
+                if _ >= 9:
+                    assert  False
+
+
 
                 output = self.garnn_model(x, y, batches_seen)
-
+                continue
                 if batches_seen == 0:
                     # this is a workaround to accommodate dynamically registered parameters in DCGRUCell
                     optimizer = torch.optim.Adam(self.garnn_model.parameters(), lr=base_lr, eps=epsilon)

@@ -10,7 +10,7 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-
+import logging
 
 class GraphAttentionLayer(nn.Module):
     def __init__(self, in_c, out_c):
@@ -34,9 +34,12 @@ class GraphAttentionLayer(nn.Module):
             output features, [B, N, D].
         """
         graph = torch.tensor(graph).cuda()
+        # print('inputs', inputs.shape)
+        logging.warning('inputs-shape, {}'.format(inputs.shape))
         h = self.W(inputs)  # [B, N, D]，一个线性层，就是第一步中公式的 W*h
-        print('h',h.shape)
-        print('inputs',inputs.shape)
+        # print('h',h.shape)
+        logging.warning('h-shape, {}'.format(h.shape))
+
 
         # 下面这个就是，第i个节点和第j个节点之间的特征做了一个内积，表示它们特征之间的关联强度
         # 再用graph也就是邻接矩阵相乘，因为邻接矩阵用0-1表示，0就表示两个节点之间没有边相连
