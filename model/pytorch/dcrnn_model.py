@@ -32,10 +32,13 @@ class EncoderModel(nn.Module, Seq2SeqAttrs):
         nn.Module.__init__(self)
         Seq2SeqAttrs.__init__(self, adj_mx, **model_kwargs)
         self.input_dim = int(model_kwargs.get('input_dim', 1))
+
         self.seq_len = int(model_kwargs.get('seq_len'))  # for the encoder
         self.gagru_layers = nn.ModuleList(
-            [GAGRUCell(self.rnn_units, adj_mx, self.num_nodes
-     ) for _ in range(self.num_rnn_encode_layers)])
+            [GAGRUCell(self.rnn_units, adj_mx, self.num_nodes, self.input_dim
+                       )] +
+            [GAGRUCell(self.rnn_units, adj_mx, self.num_nodes,self.rnn_units
+     ) for _ in range(self.num_rnn_encode_layers - 1)])
 
 
 
@@ -51,7 +54,7 @@ class EncoderModel(nn.Module, Seq2SeqAttrs):
                  (lower indices mean lower layers)
         """
         batch_size, *_ = inputs.size()
-        print('model-54',inputs.size())
+        # print('model-54',inputs.size())
         if hidden_state is None:
             hidden_state = torch.zeros((self.num_rnn_encode_layers, batch_size, *self.hidden_state_size),
                                        device=device)
@@ -62,8 +65,8 @@ class EncoderModel(nn.Module, Seq2SeqAttrs):
         for layer_num, gagru_layer in enumerate(self.gagru_layers):
             # print('layer_num',layer_num)
             # print('output.size',output.shape)
-            logging.warning('layer_num {}'.format(layer_num))
-            logging.warning('output size {}'.format(output.shape))
+            logging.warning('enlayer_num {}'.format(layer_num))
+            logging.warning('enoutput size {}'.format(output.shape))
             next_hidden_state = gagru_layer(output , hidden_state[layer_num])
             hidden_states.append(next_hidden_state)
             output = next_hidden_state
@@ -83,9 +86,17 @@ class DecoderModel(nn.Module, Seq2SeqAttrs):
         self.output_dim = int(model_kwargs.get('output_dim', 1))
         self.horizon = int(model_kwargs.get('horizon', 1))  # for the decoder
         self.projection_layer = nn.Linear(self.rnn_units, self.output_dim)
+        # self.gagru_layers = nn.ModuleList(
+        #     [GAGRUCell(self.rnn_units, adj_mx,  self.num_nodes , self.rnn_units) for _ in range(self.num_rnn_decode_layers)])
         self.gagru_layers = nn.ModuleList(
-            [GAGRUCell(self.rnn_units, adj_mx,  self.num_nodes) for _ in range(self.num_rnn_decode_layers)])
-
+            [GAGRUCell(self.rnn_units, adj_mx, self.num_nodes, self.output_dim
+                       )] +
+            [GAGRUCell(self.rnn_units, adj_mx, self.num_nodes, self.rnn_units
+                       ) for _ in range(self.num_rnn_decode_layers - 1)])
+        # self.gagru_layers = nn.ModuleList([GAGRUCell(self.rnn_units, adj_mx, self.num_nodes, self.rnn_units
+        #                ) for _ in range(self.num_rnn_decode_layers - 1)] +
+        #     [GAGRUCell(self.rnn_units, adj_mx, self.num_nodes, self.output_dim
+        #                )])
     def forward(self, inputs, hidden_state=None):
         """
         Decoder forward pass.
@@ -99,13 +110,17 @@ class DecoderModel(nn.Module, Seq2SeqAttrs):
         """
         hidden_states = []
         output = inputs
+        logging.warning('output size {}'.format(output.shape))
         for layer_num, gagru_layer in enumerate(self.gagru_layers):
+            logging.warning('delayer_num {}'.format(layer_num))
+            logging.warning('deoutput size {}'.format(output.shape))
             next_hidden_state = gagru_layer(output, hidden_state[layer_num])
             hidden_states.append(next_hidden_state)
             output = next_hidden_state
+        logging.warning('llllllllllllllllll output size {}'.format(output.shape))
 
         projected = self.projection_layer(output.view(-1, self.rnn_units))
-        output = projected.view(-1, self.num_nodes * self.output_dim)
+        output = projected.view(-1, self.num_nodes ,self.output_dim)
 
         return output, torch.stack(hidden_states)
 
@@ -131,7 +146,7 @@ class GARNNModel(nn.Module, Seq2SeqAttrs):
         :return: encoder_hidden_state: (num_layers, batch_size, self.hidden_state_size)
         """
         encoder_hidden_state = None
-        logging.warning('encoder-input{}'.format(inputs.shape))
+        # logging.warning('encoder-input{}'.format(inputs.shape))
         for t in range(self.encoder_model.seq_len):
             _, encoder_hidden_state = self.encoder_model(inputs[t], encoder_hidden_state)
 
@@ -146,7 +161,7 @@ class GARNNModel(nn.Module, Seq2SeqAttrs):
         :return: output: (self.horizon, batch_size, self.num_nodes * self.output_dim)
         """
         batch_size = encoder_hidden_state.size(1)
-        go_symbol = torch.zeros((batch_size, self.num_nodes * self.decoder_model.output_dim),
+        go_symbol = torch.zeros((batch_size, self.num_nodes ,self.decoder_model.output_dim),
                                 device=device)
         decoder_hidden_state = encoder_hidden_state
         decoder_input = go_symbol
@@ -163,6 +178,7 @@ class GARNNModel(nn.Module, Seq2SeqAttrs):
                 if c < self._compute_sampling_threshold(batches_seen):
                     decoder_input = labels[t]
         outputs = torch.stack(outputs)
+
         return outputs
 
     def forward(self, inputs, labels=None, batches_seen=None):
@@ -174,13 +190,18 @@ class GARNNModel(nn.Module, Seq2SeqAttrs):
         :return: output: (self.horizon, batch_size, self.num_nodes * self.output_dim)
         """
         encoder_hidden_state = self.encoder(inputs)
-        return None
+        print('encoder_hidden_state',encoder_hidden_state.shape)
+
         # loss = encoder_hidden_state.sum()
         # loss.backward()
         # assert False
         self._logger.debug("Encoder complete, starting decoder")
+        logging.warning('Encoder complete, starting decoder {}'.format(inputs.shape))
+
         outputs = self.decoder(encoder_hidden_state, labels, batches_seen=batches_seen)
+        logging.warning('decode output size {}'.format(outputs.shape))
         self._logger.debug("Decoder complete")
+        logging.warning('Decoder complete{}'.format(outputs.shape))
         if batches_seen == 0:
             self._logger.info(
                 "Total trainable parameters {}".format(count_parameters(self))

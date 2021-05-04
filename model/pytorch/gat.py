@@ -20,7 +20,7 @@ class GraphAttentionLayer(nn.Module):
 
         self.F = F.softmax
 
-        self.W = nn.Linear(in_c, out_c, bias=False).cuda()  # y = W * x
+        self.W = nn.Linear(in_c, out_c, bias=False)  # y = W * x
         self.b = nn.Parameter(torch.Tensor(out_c))
 
         nn.init.normal_(self.W.weight)
@@ -35,11 +35,10 @@ class GraphAttentionLayer(nn.Module):
         """
         graph = torch.tensor(graph).cuda()
         # print('inputs', inputs.shape)
-        logging.warning('inputs-shape, {}'.format(inputs.shape))
+        # logging.warning('gat inputs-shape, {}'.format(inputs.shape))
         h = self.W(inputs)  # [B, N, D]，一个线性层，就是第一步中公式的 W*h
         # print('h',h.shape)
-        logging.warning('h-shape, {}'.format(h.shape))
-
+        # logging.warning('gat h-shape, {}'.format(h.shape))
 
         # 下面这个就是，第i个节点和第j个节点之间的特征做了一个内积，表示它们特征之间的关联强度
         # 再用graph也就是邻接矩阵相乘，因为邻接矩阵用0-1表示，0就表示两个节点之间没有边相连
@@ -77,9 +76,9 @@ class GATSubNet(nn.Module): # 这个是多头注意力机制
         # 每一个注意力头用循环取出来，放入list里，然后在最后一维串联起来
         outputs = torch.cat([attn(inputs, graph) for attn in self.attention_module], dim=-1)  # [B, N, hid_c * h_head]
         outputs = self.act(outputs)
-
+        # logging.warning('gat outputs1, {}'.format(outputs.shape))
         outputs = self.out_att(outputs, graph)
-
+        # logging.warning('gat outputs2, {}'.format(outputs.shape))
         return self.act(outputs)
 
 

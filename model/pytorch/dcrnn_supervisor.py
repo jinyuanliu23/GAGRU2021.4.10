@@ -12,7 +12,7 @@ from model.pytorch.loss import masked_rems_loss
 from model.pytorch.loss import masked_mape_loss
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-
+import logging
 class GARNNSupervisor:
     def __init__(self, adj_mx, **kwargs):
         self._kwargs = kwargs
@@ -20,7 +20,7 @@ class GARNNSupervisor:
         self._model_kwargs = kwargs.get('model')
         self._train_kwargs = kwargs.get('train')
 
-        self.max_grad_norm = self._train_kwargs.get('max_grad_norm', 1.)
+
 
         # logging.
         self._log_dir = self._get_log_dir(kwargs)
@@ -32,9 +32,10 @@ class GARNNSupervisor:
         # data set
         self._data = utils.load_dataset(**self._data_kwargs)
         self.standard_scaler = self._data['scaler']
-
+        self.batch_size = int(self._data_kwargs.get('batch_size', 1))
         self.num_nodes = int(self._model_kwargs.get('num_nodes', 1))
         self.input_dim = int(self._model_kwargs.get('input_dim', 1))
+
         self.seq_len = int(self._model_kwargs.get('seq_len'))  # for the encoder
         self.output_dim = int(self._model_kwargs.get('output_dim', 1))
         self.use_curriculum_learning = bool(
@@ -64,7 +65,7 @@ class GARNNSupervisor:
                 ['%d' % rnn_units for _ in range(num_rnn_encode_layers)])
             horizon = kwargs['model'].get('horizon')
 
-            run_id = 'dcrnn__h_%d_%s_lr_%g_bs_%d_%s/' % (
+            run_id = 'garnn__h_%d_%s_lr_%g_bs_%d_%s/' % (
                  horizon,
                 structure, learning_rate, batch_size,
                 time.strftime('%m%d%H%M%S'))
@@ -117,7 +118,7 @@ class GARNNSupervisor:
         :return: mean L1Loss
         """
         with torch.no_grad():
-            self.dcrnn_model = self.dcrnn_model.eval()
+            self.garnn_model = self.garnn_model.eval()
 
             val_iterator = self._data['{}_loader'.format(dataset)].get_iterator()
             losses = []
@@ -132,13 +133,15 @@ class GARNNSupervisor:
                 x, y = self._prepare_data(x, y)
 
                 output = self.garnn_model(x)
+                print('evsluate output',type(output))
+
                 loss = self._compute_loss(y, output)
-                loss_rems = self._compute_loss_rems(y, output)
-                loss_mape = self._compute_loss_mape(y, output)
+                # loss_rems = self._compute_loss_rems(y, output)
+                # loss_mape = self._compute_loss_mape(y, output)
 
                 losses.append(loss.item())
-                losses_rems.append(loss_rems.item())
-                losses_mape.append(loss_mape.item())
+                # losses_rems.append(loss_rems.item())
+                # losses_mape.append(loss_mape.item())
 
 
                 y_truths.append(y.cpu())
@@ -204,31 +207,42 @@ class GARNNSupervisor:
 
                 x, y = self._prepare_data(x, y)
                 # print('x-shape',x.shape)
-                if _ >= 9:
-                    assert  False
+                # if _ >= 9:
+                #     assert  False
 
 
 
                 output = self.garnn_model(x, y, batches_seen)
-                continue
+                print('xxxxxxxxxxxxxxxxxxxxx output', output.shape)
+                print('xxxxxxxxxxxxxxxxxxxxx x', x.shape)
+                print('xxxxxxxxxxxxxxxxxxxxx y', y.shape)
+
+
+
+                # print('output.type',output.type())
+                y = y.view(self.seq_len, self.batch_size, self.num_nodes*self.output_dim)
+                output = output.view(self.seq_len, self.batch_size, self.num_nodes * self.output_dim)
+
                 if batches_seen == 0:
                     # this is a workaround to accommodate dynamically registered parameters in DCGRUCell
                     optimizer = torch.optim.Adam(self.garnn_model.parameters(), lr=base_lr, eps=epsilon)
 
                 loss = self._compute_loss(y, output)
+
+
+
                 # loss_rems = self._compute_loss_rems(y,output)
                 # loss_mape = self._compute_loss_mape(y,output)
                 # if not (_ % 100):
                 #     self._writer.add_scalar('step_loss', np.mean(loss.item()), _)
                 self._logger.debug(loss.item())
-                # self._logger.debug(losses_rems.item())
-                # self._logger.debug(losses_mape.item())
+
 
                 losses.append(loss.item())
-                # losses_rems.append(loss_rems.item())
-                # losses_mape.append(loss_mape.item())
 
-                batches_seen = 1 + batches_seen
+
+
+                batches_seen = batches_seen + 1
                 loss.backward()
 
                 # gradient clipping - this does it in place
@@ -318,6 +332,9 @@ class GARNNSupervisor:
         return x, y
 
     def _compute_loss(self, y_true, y_predicted):
+        # y_predicted = y_predicted.view(-1, self.num_nodes , self.output_dim)
+        print('oooooooooooooooooo y_true', y_true.shape)
+        print('oooooooooooooooooo y_predicted', y_predicted.shape)
         y_true = self.standard_scaler.inverse_transform(y_true)
         y_predicted = self.standard_scaler.inverse_transform(y_predicted)
         return masked_mae_loss(y_predicted, y_true)
