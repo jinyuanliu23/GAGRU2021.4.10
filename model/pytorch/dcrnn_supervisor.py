@@ -6,21 +6,21 @@ import torch
 from torch.utils.tensorboard import SummaryWriter
 
 from lib import utils
-from model.pytorch.dcrnn_model import GARNNModel
+from model.pytorch.dcrnn_model import DCRNNModel
 from model.pytorch.loss import masked_mae_loss
 from model.pytorch.loss import masked_rems_loss
 from model.pytorch.loss import masked_mape_loss
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-import logging
-class GARNNSupervisor:
+
+class DCRNNSupervisor:
     def __init__(self, adj_mx, **kwargs):
         self._kwargs = kwargs
         self._data_kwargs = kwargs.get('data')
         self._model_kwargs = kwargs.get('model')
         self._train_kwargs = kwargs.get('train')
 
-
+        self.max_grad_norm = self._train_kwargs.get('max_grad_norm', 1.)
 
         # logging.
         self._log_dir = self._get_log_dir(kwargs)
@@ -32,10 +32,9 @@ class GARNNSupervisor:
         # data set
         self._data = utils.load_dataset(**self._data_kwargs)
         self.standard_scaler = self._data['scaler']
-        self.batch_size = int(self._data_kwargs.get('batch_size', 1))
+
         self.num_nodes = int(self._model_kwargs.get('num_nodes', 1))
         self.input_dim = int(self._model_kwargs.get('input_dim', 1))
-
         self.seq_len = int(self._model_kwargs.get('seq_len'))  # for the encoder
         self.output_dim = int(self._model_kwargs.get('output_dim', 1))
         self.use_curriculum_learning = bool(
@@ -43,8 +42,8 @@ class GARNNSupervisor:
         self.horizon = int(self._model_kwargs.get('horizon', 1))  # for the decoder
 
         # setup model
-        garnn_model = GARNNModel(adj_mx, self._logger, **self._model_kwargs)
-        self.garnn_model = garnn_model.cuda() if torch.cuda.is_available() else garnn_model
+        dcrnn_model = DCRNNModel(adj_mx, self._logger, **self._model_kwargs)
+        self.dcrnn_model = dcrnn_model.cuda() if torch.cuda.is_available() else dcrnn_model
         self._logger.info("Model created")
 
         self._epoch_num = self._train_kwargs.get('epoch', 0)
@@ -58,15 +57,20 @@ class GARNNSupervisor:
             batch_size = kwargs['data'].get('batch_size')
             # batch_size = kwargs['data'].get('batch_size') * kwargs['train'].get('update_freq')
             learning_rate = kwargs['train'].get('base_lr')
-
+            max_diffusion_step = kwargs['model'].get('max_diffusion_step')
             num_rnn_encode_layers = kwargs['model'].get('num_rnn_encode_layers')
             rnn_units = kwargs['model'].get('rnn_units')
             structure = '-'.join(
                 ['%d' % rnn_units for _ in range(num_rnn_encode_layers)])
             horizon = kwargs['model'].get('horizon')
-
-            run_id = 'garnn__h_%d_%s_lr_%g_bs_%d_%s/' % (
-                 horizon,
+            filter_type = kwargs['model'].get('filter_type')
+            filter_type_abbr = 'L'
+            if filter_type == 'random_walk':
+                filter_type_abbr = 'R'
+            elif filter_type == 'dual_random_walk':
+                filter_type_abbr = 'DR'
+            run_id = 'dcrnn_%s_%d_h_%d_%s_lr_%g_bs_%d_%s/' % (
+                filter_type_abbr, max_diffusion_step, horizon,
                 structure, learning_rate, batch_size,
                 time.strftime('%m%d%H%M%S'))
             base_dir = kwargs.get('base_dir')
@@ -80,7 +84,7 @@ class GARNNSupervisor:
             os.makedirs('models/')
 
         config = dict(self._kwargs)
-        config['model_state_dict'] = self.garnn_model.state_dict()
+        config['model_state_dict'] = self.dcrnn_model.state_dict()
         config['epoch'] = epoch
         torch.save(config, 'models/epo%d.tar' % epoch)
         self._logger.info("Saved model at {}".format(epoch))
@@ -90,19 +94,18 @@ class GARNNSupervisor:
         self._setup_graph()
         assert os.path.exists('models/epo%d.tar' % self._epoch_num), 'Weights at epoch %d not found' % self._epoch_num
         checkpoint = torch.load('models/epo%d.tar' % self._epoch_num, map_location='cpu')
-        self.garnn_model.load_state_dict(checkpoint['model_state_dict'])
+        self.dcrnn_model.load_state_dict(checkpoint['model_state_dict'])
         self._logger.info("Loaded model at {}".format(self._epoch_num))
 
     def _setup_graph(self):
         with torch.no_grad():
-            self.garnn_model = self.garnn_model.eval()
+            self.dcrnn_model = self.dcrnn_model.eval()
 
             val_iterator = self._data['val_loader'].get_iterator()
 
             for _, (x, y) in enumerate(val_iterator):
                 x, y = self._prepare_data(x, y)
-
-                output = self.garnn_model(x)
+                output = self.dcrnn_model(x)
                 break
 
     def train(self, **kwargs):
@@ -118,7 +121,7 @@ class GARNNSupervisor:
         :return: mean L1Loss
         """
         with torch.no_grad():
-            self.garnn_model = self.garnn_model.eval()
+            self.dcrnn_model = self.dcrnn_model.eval()
 
             val_iterator = self._data['{}_loader'.format(dataset)].get_iterator()
             losses = []
@@ -132,16 +135,14 @@ class GARNNSupervisor:
             for _, (x, y) in enumerate(val_iterator):
                 x, y = self._prepare_data(x, y)
 
-                output = self.garnn_model(x)
-                print('evsluate output',type(output))
-
+                output = self.dcrnn_model(x)
                 loss = self._compute_loss(y, output)
-                # loss_rems = self._compute_loss_rems(y, output)
-                # loss_mape = self._compute_loss_mape(y, output)
+                loss_rems = self._compute_loss_rems(y, output)
+                loss_mape = self._compute_loss_mape(y, output)
 
                 losses.append(loss.item())
-                # losses_rems.append(loss_rems.item())
-                # losses_mape.append(loss_mape.item())
+                losses_rems.append(loss_rems.item())
+                losses_mape.append(loss_mape.item())
 
 
                 y_truths.append(y.cpu())
@@ -176,7 +177,7 @@ class GARNNSupervisor:
         # steps is used in learning rate - will see if need to use it?
         min_val_loss = float('inf')
         wait = 0
-        optimizer = torch.optim.Adam(self.garnn_model.parameters(), lr=base_lr, eps=epsilon)
+        optimizer = torch.optim.Adam(self.dcrnn_model.parameters(), lr=base_lr, eps=epsilon)
 
         lr_scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, milestones=steps,
                                                             gamma=lr_decay_ratio)
@@ -191,7 +192,7 @@ class GARNNSupervisor:
 
         for epoch_num in range(self._epoch_num, epochs):
 
-            self.garnn_model = self.garnn_model.train()
+            self.dcrnn_model = self.dcrnn_model.train()
 
             train_iterator = self._data['train_loader'].get_iterator()
             losses = []
@@ -206,47 +207,31 @@ class GARNNSupervisor:
                 optimizer.zero_grad()
 
                 x, y = self._prepare_data(x, y)
-                # print('x-shape',x.shape)
-                # if _ >= 9:
-                #     assert  False
 
-
-
-                output = self.garnn_model(x, y, batches_seen)
-                print('xxxxxxxxxxxxxxxxxxxxx output', output.shape)
-                print('xxxxxxxxxxxxxxxxxxxxx x', x.shape)
-                print('xxxxxxxxxxxxxxxxxxxxx y', y.shape)
-
-
-
-                # print('output.type',output.type())
-                y = y.view(self.seq_len, self.batch_size, self.num_nodes*self.output_dim)
-                output = output.view(self.seq_len, self.batch_size, self.num_nodes * self.output_dim)
+                output = self.dcrnn_model(x, y, batches_seen)
 
                 if batches_seen == 0:
                     # this is a workaround to accommodate dynamically registered parameters in DCGRUCell
-                    optimizer = torch.optim.Adam(self.garnn_model.parameters(), lr=base_lr, eps=epsilon)
+                    optimizer = torch.optim.Adam(self.dcrnn_model.parameters(), lr=base_lr, eps=epsilon)
 
                 loss = self._compute_loss(y, output)
-
-
-
                 # loss_rems = self._compute_loss_rems(y,output)
                 # loss_mape = self._compute_loss_mape(y,output)
                 # if not (_ % 100):
                 #     self._writer.add_scalar('step_loss', np.mean(loss.item()), _)
                 self._logger.debug(loss.item())
-
+                # self._logger.debug(losses_rems.item())
+                # self._logger.debug(losses_mape.item())
 
                 losses.append(loss.item())
+                # losses_rems.append(loss_rems.item())
+                # losses_mape.append(loss_mape.item())
 
-
-
-                batches_seen = batches_seen + 1
+                batches_seen += 1
                 loss.backward()
 
                 # gradient clipping - this does it in place
-                torch.nn.utils.clip_grad_norm_(self.garnn_model.parameters(), self.max_grad_norm)
+                torch.nn.utils.clip_grad_norm_(self.dcrnn_model.parameters(), self.max_grad_norm)
 
                 optimizer.step()
                 # if not (_ % kwargs.get('update_freq')):
@@ -326,15 +311,12 @@ class GARNNSupervisor:
                  y: shape (horizon, batch_size, num_sensor * output_dim)
         """
         batch_size = x.size(1)
-        x = x.view(self.seq_len, batch_size, self.num_nodes , self.input_dim)
+        x = x.view(self.seq_len, batch_size, self.num_nodes * self.input_dim)
         y = y[..., :self.output_dim].view(self.horizon, batch_size,
-                                          self.num_nodes , self.output_dim)
+                                          self.num_nodes * self.output_dim)
         return x, y
 
     def _compute_loss(self, y_true, y_predicted):
-        # y_predicted = y_predicted.view(-1, self.num_nodes , self.output_dim)
-        print('oooooooooooooooooo y_true', y_true.shape)
-        print('oooooooooooooooooo y_predicted', y_predicted.shape)
         y_true = self.standard_scaler.inverse_transform(y_true)
         y_predicted = self.standard_scaler.inverse_transform(y_predicted)
         return masked_mae_loss(y_predicted, y_true)
