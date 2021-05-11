@@ -11,6 +11,8 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import logging
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
 
 class GraphAttentionLayer(nn.Module):
     def __init__(self, in_c, out_c):
@@ -18,9 +20,10 @@ class GraphAttentionLayer(nn.Module):
         self.in_c = in_c
         self.out_c = out_c
 
+
         self.F = F.softmax
 
-        self.W = nn.Linear(in_c, out_c, bias=False)  # y = W * x
+        self.W = nn.Linear(in_c, out_c).cuda()  # y = W * x
         self.b = nn.Parameter(torch.Tensor(out_c))
 
         nn.init.normal_(self.W.weight)
@@ -43,14 +46,14 @@ class GraphAttentionLayer(nn.Module):
         # 下面这个就是，第i个节点和第j个节点之间的特征做了一个内积，表示它们特征之间的关联强度
         # 再用graph也就是邻接矩阵相乘，因为邻接矩阵用0-1表示，0就表示两个节点之间没有边相连
         # 那么最终结果中的0就表示节点之间没有边相连
-        outputs = torch.bmm(h, h.transpose(1, 2)).cuda() * graph.unsqueeze(
+        outputs = torch.matmul(h, h.transpose(1, 2)) * graph.unsqueeze(
             0)  # [B, N, D]*[B, D, N]->[B, N, N],         x(i)^T * x(j)
 
         # 由于上面计算的结果中0表示节点之间没关系，所以将这些0换成负无穷大，因为softmax的负无穷大=0
         outputs.data.masked_fill_(torch.eq(outputs, 0), -float(1e16))
 
-        attention = self.F(outputs, dim=2)  # [B, N, N]，在第２维做归一化，就是说所有有边相连的节点做一个归一化，得到了注意力系数
-        return torch.bmm(attention, h).cuda() + self.b.cuda()  # [B, N, N] * [B, N, D]，，这个是第三步的，利用注意力系数对邻域节点进行有区别的信息聚合
+        attention = self.F(outputs, dim=2) # [B, N, N]，在第２维做归一化，就是说所有有边相连的节点做一个归一化，得到了注意力系数
+        return torch.matmul(attention, h).cuda() + self.b.cuda()  # [B, N, N] * [B, N, D]，，这个是第三步的，利用注意力系数对邻域节点进行有区别的信息聚合
 
 
 class GATSubNet(nn.Module): # 这个是多头注意力机制
