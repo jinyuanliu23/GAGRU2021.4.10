@@ -141,8 +141,8 @@ class GARNNModel(nn.Module, Seq2SeqAttrs):
         self.cl_decay_steps = int(model_kwargs.get('cl_decay_steps', 1000))
         self.use_curriculum_learning = bool(model_kwargs.get('use_curriculum_learning', False))
         self._logger = logger
-        self.linearlayeren = nn.Linear(self.rnn_units,self.rnn_units)
-        self.linearlayerde = nn.Linear(self.rnn_units, self.rnn_units)
+        # self.linearlayeren = nn.Linear(self.rnn_units,self.rnn_units)
+        # self.linearlayerde = nn.Linear(self.rnn_units, self.rnn_units)
     def _compute_sampling_threshold(self, batches_seen):
         return self.cl_decay_steps / (
                 self.cl_decay_steps + np.exp(batches_seen / self.cl_decay_steps))
@@ -198,7 +198,7 @@ class GARNNModel(nn.Module, Seq2SeqAttrs):
         :return: output: (self.horizon, batch_size, self.num_nodes * self.output_dim)
         """
         encoder_hidden_state = self.encoder(inputs)
-        encoder_hidden_state = self.linearlayeren(encoder_hidden_state)
+        # encoder_hidden_state = self.linearlayeren(encoder_hidden_state)
         # print('encoder_hidden_state',encoder_hidden_state.shape)
 
         # loss = encoder_hidden_state.sum()

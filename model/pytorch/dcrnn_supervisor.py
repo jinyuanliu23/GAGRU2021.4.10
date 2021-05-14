@@ -41,7 +41,7 @@ class GARNNSupervisor:
         self.use_curriculum_learning = bool(
             self._model_kwargs.get('use_curriculum_learning', False))
         self.horizon = int(self._model_kwargs.get('horizon', 1))  # for the decoder
-
+        adj_mx = torch.tensor(adj_mx).cuda()
         # setup model
         garnn_model = GARNNModel(adj_mx, self._logger, **self._model_kwargs)
         self.garnn_model = garnn_model.cuda() if torch.cuda.is_available() else garnn_model

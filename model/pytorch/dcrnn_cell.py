@@ -3,13 +3,14 @@ import torch
 # from MultiGAT import GAT
 from lib import utils
 
-from gat import GATSubNet
+from gatmodels import GATSubNet
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 import logging
 
 class LayerParams:
 
-    def __init__(self, rnn_network: torch.nn.Module, layer_type: str):
+    def __init__(self, rnn_network: torch.nn.Module, layer_type: str ):
+        super().__init__()
         self._rnn_network = rnn_network
         self._params_dict = {}
         self._biases_dict = {}
@@ -36,7 +37,7 @@ class LayerParams:
 
 
 class GAGRUCell(torch.nn.Module):
-    def __init__(self, num_units, adj_mx,  num_nodes,input_dim, nonlinearity='tanh', use_ga_for_ru=True):
+    def __init__(self, num_units, adj_mx,  num_nodes,input_dim, nonlinearity='tanh', use_ga_for_ru=True,**model_kwargs):
         """
         :param num_units:
         :param adj_mx:
@@ -52,17 +53,27 @@ class GAGRUCell(torch.nn.Module):
         self._num_nodes = num_nodes
         self._num_units = num_units
         self.input_dim = input_dim
-        self.multi_head_nums = 3
+        self.multi_head_nums = int(model_kwargs.get('multi_head_nums', 4))
         self._supports = []
         self._use_ga_for_ru = use_ga_for_ru
         self.adj_mx = adj_mx
         self._fc_params = LayerParams(self, 'fc')
         self._gat1_params = LayerParams(self, 'gat1')
         self._gat2_params = LayerParams(self, 'gat2')
-        num_dim=self._num_units + self.input_dim
-        self.model1 = GATSubNet( num_dim,  num_dim,  num_dim, self.multi_head_nums)
-        self.model2 = GATSubNet(num_dim,  num_dim,  num_dim, self.multi_head_nums)
+        # self.batch_size = 5
+        # num_dim=(self._num_units + self.input_dim) * (self.batch_size)
+        self.dim = (self._num_units + self.input_dim)
 
+        # self.model1 = GATSubNet(num_dim,  num_dim,  num_dim, self.multi_head_nums )
+        self.model1 = GATSubNet(self.dim, self.dim, self.dim, self.multi_head_nums, dropout=0.6, alpha=0.2)
+        # self.model11 = GATSubNet(num_dim, num_dim, num_dim, self.multi_head_nums)
+        # self.model2 = GATSubNet(num_dim,  num_dim,  num_dim, self.multi_head_nums)
+        self.model2 = GATSubNet(self.dim, self.dim, self.dim, self.multi_head_nums, dropout=0.6, alpha=0.2)
+        # self.model22 = GATSubNet(num_dim, num_dim, num_dim, self.multi_head_nums)
+        self.linear1 = torch.nn.Linear(self.dim * 16,self.dim)
+        self.linear11 = torch.nn.Linear( self.dim,self.dim * 16)
+        self.linear2 = torch.nn.Linear(self.dim * 16, self.dim)
+        self.linear22 = torch.nn.Linear(self.dim , self.dim* 16)
 
     def forward(self, inputs, hx):
         """Gated recurrent unit (GRU) with Graph Convolution.
@@ -127,8 +138,19 @@ class GAGRUCell(torch.nn.Module):
         input_size = inputs_and_state.size(2)
 
         x = inputs_and_state
+        x  = torch.reshape(x,(self._num_nodes,-1))
+        x = self.linear1(x)
+        # x = torch.squeeze(x,0)
+
         # logging.warning('GATl_x1{}'.format(x.shape))
+
         x = self.model1(x, self.adj_mx)
+        x = self.linear11(x)
+        # logging.warning('GAT2_x2{}'.format(x.shape))
+        # x = torch.unsqueeze(x, 0)
+
+        # x = self.model1x(x, self.adj_mx)
+
         # logging.warning('GAT2_x2{}'.format(x.shape))
         # x = torch.tensor(x)
         x = torch.reshape(x,(batch_size * self._num_nodes,input_size))
@@ -147,9 +169,18 @@ class GAGRUCell(torch.nn.Module):
         inputs_and_state = torch.cat([inputs, state], dim=2)
         input_size = inputs_and_state.size(2)
 
+
         x = inputs_and_state
         # logging.warning('GAT2_x1{}'.format(x.shape))
+        # x  = torch.reshape(x,(self._num_nodes,-1))
+        # x = torch.squeeze(x, 0)
+        x = torch.reshape(x, (self._num_nodes, -1))
+        x = self.linear1(x)
         x = self.model2(x, self.adj_mx)
+        x = self.linear22(x)
+
+        # x = torch.unsqueeze(x, 0)
+        # x = self.model22(x, self.adj_mx)
         # logging.warning('GAT2_x2{}'.format(x.shape))
         # x = torch.tensor(x)
         x = torch.reshape(x, (batch_size * self._num_nodes, input_size))
