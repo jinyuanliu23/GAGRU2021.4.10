@@ -63,17 +63,18 @@ class GAGRUCell(torch.nn.Module):
         # self.batch_size = 5
         # num_dim=(self._num_units + self.input_dim) * (self.batch_size)
         self.dim = (self._num_units + self.input_dim)
-
+        self.batch_size = 1
+        self.dims = int(self.dim /4)
         # self.model1 = GATSubNet(num_dim,  num_dim,  num_dim, self.multi_head_nums )
-        self.model1 = GATSubNet(self.dim, self.dim, self.dim, self.multi_head_nums, dropout=0.6, alpha=0.2)
+        self.model1 = GATSubNet(int(self.dim ), int(self.dim ),int(self.dim ), self.multi_head_nums, dropout=0.6, alpha=0.2)
         # self.model11 = GATSubNet(num_dim, num_dim, num_dim, self.multi_head_nums)
         # self.model2 = GATSubNet(num_dim,  num_dim,  num_dim, self.multi_head_nums)
-        self.model2 = GATSubNet(self.dim, self.dim, self.dim, self.multi_head_nums, dropout=0.6, alpha=0.2)
+        self.model2 = GATSubNet(int(self.dim ), int(self.dim ), int(self.dim ), self.multi_head_nums, dropout=0.6, alpha=0.2)
         # self.model22 = GATSubNet(num_dim, num_dim, num_dim, self.multi_head_nums)
-        self.linear1 = torch.nn.Linear(self.dim * 16,self.dim)
-        self.linear11 = torch.nn.Linear( self.dim,self.dim * 16)
-        self.linear2 = torch.nn.Linear(self.dim * 16, self.dim)
-        self.linear22 = torch.nn.Linear(self.dim , self.dim* 16)
+        self.linear1 = torch.nn.Linear(self.dim * self.batch_size,int(self.dim ))
+        self.linear11 = torch.nn.Linear( int(self.dim ),self.dim * self.batch_size)
+        self.linear2 = torch.nn.Linear(self.dim * self.batch_size,int(self.dim ))
+        self.linear22 = torch.nn.Linear(int(self.dim ), self.dim* self.batch_size)
 
     def forward(self, inputs, hx):
         """Gated recurrent unit (GRU) with Graph Convolution.
@@ -139,15 +140,18 @@ class GAGRUCell(torch.nn.Module):
 
         x = inputs_and_state
         x  = torch.reshape(x,(self._num_nodes,-1))
-        x = self.linear1(x)
-        # x = torch.squeeze(x,0)
-
+        # logging.warning('GATl_x1{}'.format(x.shape))
+        # x = self.linear1(x)
+        x = torch.squeeze(x,0)
+        # logging.warning('GATl_x1{}'.format(x.shape))
         # logging.warning('GATl_x1{}'.format(x.shape))
 
         x = self.model1(x, self.adj_mx)
-        x = self.linear11(x)
+        # logging.warning('GATl_x1{}'.format(x.shape))
+        # x = self.linear11(x)
+        # logging.warning('GATl_x1{}'.format(x.shape))
         # logging.warning('GAT2_x2{}'.format(x.shape))
-        # x = torch.unsqueeze(x, 0)
+        x = torch.unsqueeze(x, 0)
 
         # x = self.model1x(x, self.adj_mx)
 
@@ -155,9 +159,11 @@ class GAGRUCell(torch.nn.Module):
         # x = torch.tensor(x)
         x = torch.reshape(x,(batch_size * self._num_nodes,input_size))
         weights = self._gat1_params.get_weights((input_size, output_size))
-        x = torch.sigmoid(torch.matmul(x, weights))# (batch_size * self._num_nodes, output_size)
+        x = torch.matmul(x, weights) # (batch_size * self._num_nodes, output_size)
+        # x = torch.sigmoid(torch.matmul(x, weights))# (batch_size * self._num_nodes, output_size)
         biases = self._gat1_params.get_biases(output_size, bias_start)
         x =  x + biases
+
         x = torch.reshape(x, (batch_size , self._num_nodes, output_size))
         return  x
 
@@ -173,19 +179,21 @@ class GAGRUCell(torch.nn.Module):
         x = inputs_and_state
         # logging.warning('GAT2_x1{}'.format(x.shape))
         # x  = torch.reshape(x,(self._num_nodes,-1))
-        # x = torch.squeeze(x, 0)
-        x = torch.reshape(x, (self._num_nodes, -1))
-        x = self.linear1(x)
+        x = torch.squeeze(x, 0)
+        # x = torch.reshape(x, (self._num_nodes, -1))
+        # x = self.linear2(x)
         x = self.model2(x, self.adj_mx)
-        x = self.linear22(x)
+        # x = self.linear22(x)
 
-        # x = torch.unsqueeze(x, 0)
+
+        x = torch.unsqueeze(x, 0)
         # x = self.model22(x, self.adj_mx)
         # logging.warning('GAT2_x2{}'.format(x.shape))
         # x = torch.tensor(x)
         x = torch.reshape(x, (batch_size * self._num_nodes, input_size))
         weights = self._gat2_params.get_weights((input_size, output_size))
-        x = torch.sigmoid(torch.matmul(x, weights))  # (batch_size * self._num_nodes, output_size)
+        x = torch.matmul(x, weights)
+        # x = torch.sigmoid(torch.matmul(x, weights))# (batch_size * self._num_nodes, output_size)
         biases = self._gat2_params.get_biases(output_size, bias_start)
         x = x + biases
         # Reshape res back to 2D: (batch_size, num_node, state_dim) -> (batch_size, num_node * state_dim)
