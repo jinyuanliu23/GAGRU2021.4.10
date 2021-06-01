@@ -32,6 +32,8 @@ class EncoderModel(nn.Module, Seq2SeqAttrs):
         nn.Module.__init__(self)
         Seq2SeqAttrs.__init__(self, adj_mx, **model_kwargs)
         self.input_dim = int(model_kwargs.get('input_dim', 1))
+        self.output_dim = int(model_kwargs.get('output_dim', 1))
+        self.horizon = int(model_kwargs.get('horizon', 1))  # for the decoder
         self.linearlayerencoder = nn.Linear(self.rnn_units,self.rnn_units)
         self.lstm = nn.LSTM(self.rnn_units, (self.num_rnn_encode_layers * self.rnn_units) // 2, bidirectional=True, batch_first=True)
         self.att = nn.Linear(2 * ((self.num_rnn_encode_layers * self.rnn_units) // 2), 1)
@@ -42,6 +44,7 @@ class EncoderModel(nn.Module, Seq2SeqAttrs):
             [GAGRUCell(self.rnn_units, adj_mx, self.num_nodes,self.rnn_units
      ) for _ in range(self.num_rnn_encode_layers - 1)])
 
+        self.projection_layer = nn.Linear(self.rnn_units, self.output_dim)
 
 
     def forward(self, inputs, hidden_state = None):
@@ -64,6 +67,7 @@ class EncoderModel(nn.Module, Seq2SeqAttrs):
         output = inputs
         # print('output.size',output.shape)
         # return None
+        # logging.warning('en imput_size {}'.format(output.shape))
         for layer_num, gagru_layer in enumerate(self.gagru_layers):
             # print('layer_num',layer_num)
             # print('output.size',output.shape)
@@ -80,6 +84,8 @@ class EncoderModel(nn.Module, Seq2SeqAttrs):
         # alpha = torch.softmax(alpha, dim=-1)
         #
         # output = (next_hidden_states* alpha.unsqueeze(-1)).sum(dim=1)
+        projected = self.projection_layer(output.view(-1, self.rnn_units))
+        output = projected.view(-1, self.num_nodes ,self.output_dim)
         return output, torch.stack(hidden_states)  # runs in O(num_layers) so not too slow
 
 
@@ -148,17 +154,23 @@ class GARNNModel(nn.Module, Seq2SeqAttrs):
                 self.cl_decay_steps + np.exp(batches_seen / self.cl_decay_steps))
 
     def encoder(self, inputs):
-        """
-        encoder forward pass on t time steps
-        :param inputs: shape (seq_len, batch_size, num_sensor * input_dim)
-        :return: encoder_hidden_state: (num_layers, batch_size, self.hidden_state_size)
-        """
+        # """
+        # encoder forward pass on t time steps
+        # :param inputs: shape (seq_len, batch_size, num_sensor * input_dim)
+        # :return: encoder_hidden_state: (num_layers, batch_size, self.hidden_state_size)
+        # """
+        outputs = []
         encoder_hidden_state = None
         # logging.warning('encoder-input{}'.format(inputs.shape))
         for t in range(self.encoder_model.seq_len):
-            _, encoder_hidden_state = self.encoder_model(inputs[t], encoder_hidden_state)
+            encoder_output, encoder_hidden_state = self.encoder_model(inputs[t], encoder_hidden_state)
         # logging.warning('encoder-input{}'.format(encoder_hidden_state.shape))
-        return encoder_hidden_state
+            outputs.append(encoder_output)
+
+
+
+        outputs = torch.stack(outputs)
+        return outputs
 
     def decoder(self, encoder_hidden_state, labels=None, batches_seen=None):
         """
@@ -207,9 +219,9 @@ class GARNNModel(nn.Module, Seq2SeqAttrs):
         self._logger.debug("Encoder complete, starting decoder")
         # logging.warning('Encoder complete, starting decoder {}'.format(inputs.shape))
 
-        outputs = self.decoder(encoder_hidden_state, labels, batches_seen=batches_seen)
+        # outputs = self.decoder(encoder_hidden_state, labels, batches_seen=batches_seen)
         # logging.warning('decode output size {}'.format(outputs.shape))
-        self._logger.debug("Decoder complete")
+        # self._logger.debug("Decoder complete")
         # logging.warning('Decoder complete{}'.format(outputs.shape))
 
         if batches_seen == 0:
@@ -217,7 +229,7 @@ class GARNNModel(nn.Module, Seq2SeqAttrs):
                 "Total trainable parameters {}".format(count_parameters(self))
             )
 
-        return outputs
+        return encoder_hidden_state
 
 # if __name__ == "__main__":
 #  # test here

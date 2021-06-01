@@ -64,7 +64,7 @@ class GAGRUCell(torch.nn.Module):
         # num_dim=(self._num_units + self.input_dim) * (self.batch_size)
         self.dim = (self._num_units + self.input_dim)
         self.batch_size = 1
-        self.dims = int(self.dim /4)
+        # self.dims = int(self.dim /4)
         # self.model1 = GATSubNet(num_dim,  num_dim,  num_dim, self.multi_head_nums )
         self.model1 = GATSubNet(int(self.dim ), int(self.dim ),int(self.dim ), self.multi_head_nums, dropout=0.6, alpha=0.2)
         # self.model11 = GATSubNet(num_dim, num_dim, num_dim, self.multi_head_nums)
