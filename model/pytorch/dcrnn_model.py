@@ -6,7 +6,7 @@ import torch.nn as nn
 import logging
 from model.pytorch.dcrnn_cell import GAGRUCell
 
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+device = torch.device("cuda:2" if torch.cuda.is_available() else "cpu")
 
 
 def count_parameters(model):
@@ -43,6 +43,7 @@ class EncoderModel(nn.Module, Seq2SeqAttrs):
                        )] +
             [GAGRUCell(self.rnn_units, adj_mx, self.num_nodes,self.rnn_units
      ) for _ in range(self.num_rnn_encode_layers - 1)])
+        self.JKNet = JumpingKnowledge(self.rnn_units, self.num_rnn_encode_layers).cuda(2)
 
         self.projection_layer = nn.Linear(self.rnn_units, self.output_dim)
 
@@ -64,6 +65,7 @@ class EncoderModel(nn.Module, Seq2SeqAttrs):
             hidden_state = torch.zeros((self.num_rnn_encode_layers, batch_size, *self.hidden_state_size),
                                        device=device)
         hidden_states = []
+        hidden_statess = []
         output = inputs
         # print('output.size',output.shape)
         # return None
@@ -84,6 +86,9 @@ class EncoderModel(nn.Module, Seq2SeqAttrs):
         # alpha = torch.softmax(alpha, dim=-1)
         #
         # output = (next_hidden_states* alpha.unsqueeze(-1)).sum(dim=1)
+        for i in range(len(hidden_states)):
+            hidden_statess.append(hidden_states[i].squeeze(0))
+        output= self.JKNet(hidden_statess)
         projected = self.projection_layer(output.view(-1, self.rnn_units))
         output = projected.view(-1, self.num_nodes ,self.output_dim)
         return output, torch.stack(hidden_states)  # runs in O(num_layers) so not too slow
@@ -248,16 +253,16 @@ class GARNNModel(nn.Module, Seq2SeqAttrs):
 
 class JumpingKnowledge(torch.nn.Module):
 
-    def __init__(self, mode, channels, num_layers):
+    def __init__(self,  channels, num_layers):
         super(JumpingKnowledge, self).__init__()
 
 
-        if mode == 'lstm':
-            self.lstm = LSTM(
+
+        self.lstm = torch.nn.LSTM(
                 channels, (num_layers * channels) // 2,
                 bidirectional=True,
                 batch_first=True)
-            self.att = Linear(2 * ((num_layers * channels) // 2), 1)
+        self.att = torch.nn.Linear(2 * ((num_layers * channels) // 2), 1)
 
         self.reset_parameters()
 
@@ -268,8 +273,8 @@ class JumpingKnowledge(torch.nn.Module):
             self.att.reset_parameters()
 
     def forward(self, xs):
-
-        x = torch.stack(xs, dim=1)  # [num_nodes, num_layers, num_channels]
+        x = torch.stack(xs, dim=1)
+        # x = torch.stack(xs, dim=1)  # [num_nodes, num_layers, num_channels]
         alpha, _ = self.lstm(x)
         alpha = self.att(alpha).squeeze(-1)  # [num_nodes, num_layers]
         alpha = torch.softmax(alpha, dim=-1)

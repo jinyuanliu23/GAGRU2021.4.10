@@ -10,7 +10,7 @@ from model.pytorch.dcrnn_model import GARNNModel
 from model.pytorch.loss import masked_mae_loss
 from model.pytorch.loss import masked_rems_loss
 from model.pytorch.loss import masked_mape_loss
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+device = torch.device("cuda:2" if torch.cuda.is_available() else "cpu")
 
 import logging
 class GARNNSupervisor:
@@ -41,10 +41,10 @@ class GARNNSupervisor:
         self.use_curriculum_learning = bool(
             self._model_kwargs.get('use_curriculum_learning', False))
         self.horizon = int(self._model_kwargs.get('horizon', 1))  # for the decoder
-        adj_mx = torch.tensor(adj_mx).cuda()
+        adj_mx = torch.tensor(adj_mx).cuda(2)
         # setup model
         garnn_model = GARNNModel(adj_mx, self._logger, **self._model_kwargs)
-        self.garnn_model = garnn_model.cuda() if torch.cuda.is_available() else garnn_model
+        self.garnn_model = garnn_model.cuda(2) if torch.cuda.is_available() else garnn_model
         self._logger.info("Model created")
 
         self._epoch_num = self._train_kwargs.get('epoch', 0)

@@ -4,7 +4,7 @@ import torch
 from lib import utils
 
 from gatmodels import GATSubNet
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+device = torch.device("cuda:2" if torch.cuda.is_available() else "cpu")
 import logging
 
 class LayerParams:
